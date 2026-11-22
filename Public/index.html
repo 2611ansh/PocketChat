@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PocketChat">
+<link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/icon.svg">
+<title>PocketChat</title>
+<style>
+:root{--bg:#f4f5f2;--panel:#fff;--ink:#1b1f1d;--mute:#6b736f;--line:#dde1dc;--me:#1f7a55;--meink:#fff;--bot:#e9ece7;--code:#1b1f1d}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--panel:#1c2024;--ink:#e8ece9;--mute:#8b948f;--line:#2a2f34;--me:#7dd3a8;--meink:#0d1f17;--bot:#242a2f;--code:#0d1013}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:16px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif;background:var(--bg);color:var(--ink);display:flex;overflow:hidden}
+button,select,textarea,input{font:inherit;color:inherit}
+#side{width:290px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;height:100%}
+header{display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 12px 8px;border-bottom:1px solid var(--line);background:var(--panel)}
+header select{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px}
+.ib{background:none;border:0;font-size:22px;padding:6px 10px;cursor:pointer;color:var(--ink)}
+#msgs{flex:1;overflow-y:auto;padding:16px 12px;display:flex;flex-direction:column;gap:12px;-webkit-overflow-scrolling:touch}
+.m{max-width:min(720px,88%);padding:10px 14px;border-radius:18px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.u{align-self:flex-end;background:var(--me);color:var(--meink);border-bottom-right-radius:6px}
+.a{align-self:flex-start;background:var(--bot);border-bottom-left-radius:6px}
+.a pre{background:var(--code);color:#e8ece9;padding:10px;border-radius:10px;overflow-x:auto;font-size:13px;white-space:pre}
+.a code{font-family:ui-monospace,Menlo,monospace;font-size:.9em}.a :not(pre)>code{background:var(--line);padding:1px 5px;border-radius:5px}
+.err{color:#c0392b}
+#empty{margin:auto;text-align:center;color:var(--mute);padding:20px}
+form{display:flex;gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line);align-items:flex-end}
+textarea{flex:1;resize:none;max-height:160px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:10px 14px;outline:none}
+#clip{padding:6px 2px;align-self:center}#send{background:var(--me);color:var(--meink);border:0;border-radius:50%;width:42px;height:42px;font-size:18px;cursor:pointer}
+#new{margin:12px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);cursor:pointer}
+#list{flex:1;overflow-y:auto}
+.c{display:flex;align-items:center;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--line)}
+.c.on{background:var(--bg)}.c span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.c button{background:none;border:0;color:var(--mute);font-size:16px}
+#login{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:9}
+#login input{padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);text-align:center}
+#login button{padding:10px 24px;border-radius:10px;border:0;background:var(--me);color:var(--meink)}
+#tray{display:none;padding:8px 12px 0;background:var(--panel);border-top:1px solid var(--line);gap:8px;flex-wrap:wrap}
+#tray.on{display:flex}.chip{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:4px 8px;font-size:13px;max-width:200px}
+.chip img,.m img{height:38px;width:38px;object-fit:cover;border-radius:8px}.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chip button{background:none;border:0;color:var(--mute)}
+.note{width:100%;font-size:13px;color:var(--mute)}.warn{width:100%;font-size:13px;color:#c0392b}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}.m .chips img{height:90px;width:auto;max-width:100%}.dc{font-size:13px;opacity:.85}
+.cb{margin:8px 0;border-radius:10px;overflow:hidden;background:var(--code)}
+.ch{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;font-size:12px;color:#9aa5a0;background:#ffffff14}
+.cp{background:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer}
+.ch .cp{color:#e8ece9;border-color:#ffffff33}.a .cb pre{margin:0;border-radius:0}.mact{margin-top:8px}
+.u .cp{color:inherit;border-color:currentColor;opacity:.75}.m.editing{width:min(720px,88%)}
+.ed{width:100%;font-size:16px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:8px;resize:vertical;min-height:70px;outline:none}
+.u .mact{display:flex;gap:8px}
+#scrim{display:none}
+@media(max-width:700px){
+ #side{position:fixed;inset:0 auto 0 0;z-index:5;transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 30px #0006}
+ body.open #side{transform:none}body.open #scrim{display:block;position:fixed;inset:0;z-index:4}
+}
+@media(min-width:701px){#menu{display:none}}
+</style></head><body>
+<div id="login"><h2>PocketChat</h2><input id="pin" type="password" inputmode="numeric" placeholder="PIN"><button id="go">Unlock</button></div>
+<aside id="side"><button id="new">+ New chat</button><div id="list"></div></aside><div id="scrim"></div>
+<div id="main">
+ <header><button class="ib" id="menu" aria-label="Chats">☰</button><select id="model" aria-label="Model"></select></header>
+ <div id="msgs"></div>
+ <div id="tray"></div>
+ <form id="f"><button type="button" class="ib" id="clip" aria-label="Attach">📎</button><input id="file" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.xml,.log,.yml,.yaml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.sh,.sql"><textarea id="t" rows="1" placeholder="Message"></textarea><button id="send" type="submit" aria-label="Send">↑</button></form>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let chats=JSON.parse(localStorage.pc_chats||"[]"),cur=null,busy=null;
+let models=[],pending=[];
+function save(){try{localStorage.pc_chats=JSON.stringify(chats)}catch{
+ for(const c of chats)for(const m of c.msgs)if(m.att)m.att=m.att.map(a=>a.type==="image"?{type:"image",name:a.name,data:null}:a);
+ try{localStorage.pc_chats=JSON.stringify(chats)}catch{}}}
+const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function codeBlock(p){
+ const m=p.match(/^([\w+-]*)\n/),lang=m?m[1]:"";
+ return`<div class="cb"><div class="ch"><span>${lang}</span><button type="button" class="cp" data-k="code">Copy code</button></div><pre><code>${p.replace(/^[\w+-]*\n/,"")}</code></pre></div>`;
+}
+function md(s){
+ const parts=esc(s).split(/```/);
+ return parts.map((p,i)=>i%2?codeBlock(p):
+  p.replace(/`([^`\n]+)`/g,"<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>").replace(/^#{1,4} (.+)$/gm,"<b>$1</b>")).join("");
+}
+function render(){
+ const box=$("#msgs");box.innerHTML="";
+ const c=chats.find(x=>x.id===cur);
+ if(!c||!c.msgs.length){box.innerHTML='<div id="empty">Ask anything.<br>Free models, running through your own OpenRouter key.</div>';}
+ else c.msgs.forEach((m,i)=>{const d=document.createElement("div");d.className="m "+(m.role==="user"?"u":"a")+(m.err?" err":"");
+  d.innerHTML=m.role==="user"?attHtml(m)+esc(m.content)+`<div class="mact"><button type="button" class="cp" data-k="edit" data-i="${i}">Edit</button></div>`:md(m.content)+(m.content&&!m.err?`<div class="mact"><button type="button" class="cp" data-k="all" data-i="${i}">Copy response</button></div>`:"");box.appendChild(d)});
+ box.scrollTop=box.scrollHeight;
+ $("#list").innerHTML="";
+ chats.forEach(x=>{const r=document.createElement("div");r.className="c"+(x.id===cur?" on":"");
+  r.innerHTML="<span>"+esc(x.title)+"</span><button aria-label='Delete'>✕</button>";
+  r.onclick=()=>{cur=x.id;if(x.model)$("#model").value=x.model;document.body.classList.remove("open");render()};
+  r.querySelector("button").onclick=e=>{e.stopPropagation();chats=chats.filter(y=>y!==x);if(cur===x.id)cur=null;save();render()};
+  $("#list").appendChild(r)});
+}
+async function loadModels(){
+ const sel=$("#model");
+ try{const r=await fetch("/api/models");if(r.status===401)return showLogin();
+  const ms=models=(await r.json()).sort((a,b)=>a.name.localeCompare(b.name));
+  sel.innerHTML=ms.map(m=>`<option value="${m.id}">${m.vision?"👁 ":""}${esc(m.name)}</option>`).join("");
+  const last=localStorage.pc_model;if(last&&ms.some(m=>m.id===last))sel.value=last;
+ }catch{sel.innerHTML="<option>Could not load models</option>"}
+}
+$("#model").onchange=e=>{localStorage.pc_model=e.target.value;renderTray()};
+function showLogin(){$("#login").style.display="flex"}
+$("#go").onclick=async()=>{const r=await fetch("/api/login",{method:"POST",body:JSON.stringify({pin:$("#pin").value})});
+ if(r.ok){$("#login").style.display="none";loadModels()}else{$("#pin").value="";$("#pin").placeholder="Wrong PIN"}};
+$("#new").onclick=()=>{cur=null;document.body.classList.remove("open");render();$("#t").focus()};
+$("#menu").onclick=()=>document.body.classList.add("open");
+$("#scrim").onclick=()=>document.body.classList.remove("open");
+const CAP=60000,loaded={};
+function lib(u){return loaded[u]||(loaded[u]=new Promise((ok,no)=>{const s=document.createElement("script");s.src=u;s.onload=ok;s.onerror=()=>no(new Error("Could not load the reader library (needs internet)"));document.head.appendChild(s)}))}
+function attHtml(m){
+ if(!m.att||!m.att.length)return"";
+ return'<div class="chips">'+m.att.map(a=>a.type==="image"?(a.data?`<img src="${a.data}" alt="">`:`<span class="dc">🖼 ${esc(a.name)}</span>`):`<span class="dc">📄 ${esc(a.name)}</span>`).join("")+"</div>";
+}
+function toApi(m,vis){
+ if(m.role!=="user"||!m.att||!m.att.length)return{role:m.role,content:m.content};
+ let pre="";
+ for(const a of m.att.filter(a=>a.type==="doc"))pre+=`[Attached file: ${a.name}]\n${a.text}\n[End of file]\n\n`;
+ const imgs=m.att.filter(a=>a.type==="image");
+ const note=a=>`[Attached image "${a.name}", as described by a vision model: ${a.desc||"description unavailable"}]\n\n`;
+ if(!vis||!imgs.some(a=>a.data)){for(const a of imgs)pre+=note(a);return{role:"user",content:pre+m.content}}
+ const parts=[{type:"text",text:pre+(m.content||"Describe the attached image.")}];
+ for(const a of imgs){if(a.data)parts.push({type:"image_url",image_url:{url:a.data}});else parts[0].text=note(a)+parts[0].text}
+ return{role:"user",content:parts};
+}
+async function describe(a,focus,signal){
+ const pref=/gemma|qwen.*vl|vision|pixtral|mistral-small|llama-4|gemini/i;
+ const vs=models.filter(m=>m.vision).sort((x,y)=>pref.test(y.id)-pref.test(x.id)).slice(0,5);
+ if(!vs.length)throw new Error("No free vision model is available on your OpenRouter account.");
+ const prompt="Describe this image thoroughly so someone who cannot see it can answer questions about it. Transcribe all visible text exactly. Include objects, people, layout, colors, and any chart or table values."+(focus?" The user's question about it: "+focus:"");
+ for(const m of vs){
+  try{
+   const r=await fetch("/api/chat",{method:"POST",signal,headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model:m.id,stream:false,messages:[{role:"user",content:[{type:"text",text:prompt},{type:"image_url",image_url:{url:a.data}}]}]})});
+   if(!r.ok)continue;
+   const j=await r.json(),d=j.choices?.[0]?.message?.content;
+   if(d&&d.trim())return d.trim().slice(0,6000);
+  }catch(x){if(x.name==="AbortError")throw x}
+ }
+ throw new Error("No free vision model responded just now. Try again in a moment, or pick a 👁 model.");
+}
+function renderTray(){
+ const tr=$("#tray");tr.innerHTML="";tr.classList.toggle("on",pending.length>0);
+ pending.forEach((a,i)=>{const d=document.createElement("div");d.className="chip";
+  d.innerHTML=(a.type==="image"?`<img src="${a.data}" alt="">`:"📄")+`<span>${esc(a.name)}</span><button aria-label="Remove">✕</button>`;
+  d.querySelector("button").onclick=()=>{pending.splice(i,1);renderTray()};tr.appendChild(d)});
+ const vis=!!models.find(x=>x.id===$("#model").value)?.vision;
+ if(pending.some(a=>a.type==="image")&&!vis){const w=document.createElement("div");w.className="note";w.textContent="This model can't see images, so a free vision model will read them first and pass on a description.";tr.appendChild(w)}
+}
+function shrink(f){return new Promise((ok,no)=>{const u=URL.createObjectURL(f),im=new Image();
+ im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;
+  c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL("image/jpeg",.8))};
+ im.onerror=()=>no(new Error("Could not read image "+f.name));im.src=u})}
+async function readDoc(f){
+ const ext=f.name.split(".").pop().toLowerCase();let out="";
+ if(ext==="pdf"){
+  await lib("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;
+  for(let i=1;i<=pdf.numPages&&out.length<CAP;i++){const tc=await(await pdf.getPage(i)).getTextContent();out+=tc.items.map(x=>x.str).join(" ")+"\n\n"}
+  if(!out.trim())throw new Error(f.name+" has no readable text (scanned?). Upload its pages as images instead.");
+ }else if(ext==="docx"){
+  await lib("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
+  out=(await mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value;
+ }else out=await f.text();
+ if(out.length>CAP)out=out.slice(0,CAP)+"\n[Truncated]";
+ return out;
+}
+$("#clip").onclick=()=>$("#file").click();
+$("#file").onchange=async e=>{
+ for(const f of e.target.files){
+  try{
+   if(f.type.startsWith("image/"))pending.push({type:"image",name:f.name,data:await shrink(f)});
+   else pending.push({type:"doc",name:f.name,text:await readDoc(f)});
+  }catch(x){alert(x.message)}
+  renderTray();
+ }
+ e.target.value="";
+};
+async function copyText(t){
+ try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t);return true}}catch{}
+ const ta=document.createElement("textarea");ta.value=t;ta.style.cssText="position:fixed;top:0;left:0;opacity:0;font-size:16px";
+ document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,t.length);
+ let ok=false;try{ok=document.execCommand("copy")}catch{}
+ ta.remove();return ok;
+}
+$("#msgs").addEventListener("click",async e=>{
+ const b=e.target.closest(".cp");if(!b)return;
+ const k=b.dataset.k;
+ if(k==="edit"){if(!busy)startEdit(+b.dataset.i,b.closest(".m"));return}
+ if(k==="cancel"){render();return}
+ if(k==="send"){sendEdit(+b.dataset.i,b.closest(".m"));return}
+ const text=b.dataset.k==="code"?b.closest(".cb").querySelector("code").textContent.replace(/\n$/,""):(chats.find(x=>x.id===cur)?.msgs[b.dataset.i]?.content||"");
+ const ok=await copyText(text),old=b.textContent;
+ b.textContent=ok?"Copied ✓":"Copy failed";setTimeout(()=>{b.textContent=old},1500);
+});
+const t=$("#t");t.oninput=()=>{t.style.height="auto";t.style.height=t.scrollHeight+"px"};
+t.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey&&matchMedia("(hover:hover)").matches){e.preventDefault();$("#f").requestSubmit()}};
+function startEdit(i,d){
+ const m=(chats.find(x=>x.id===cur)||{msgs:[]}).msgs[i];if(!m)return;
+ d.classList.add("editing");
+ d.innerHTML=attHtml(m)+`<textarea class="ed"></textarea><div class="mact"><button type="button" class="cp" data-k="send" data-i="${i}">Send</button><button type="button" class="cp" data-k="cancel">Cancel</button></div>`;
+ const ta=d.querySelector("textarea");ta.value=m.content;
+ ta.onkeydown=e=>{if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){e.preventDefault();sendEdit(i,d)}};
+ ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
+}
+function sendEdit(i,d){
+ const c=chats.find(x=>x.id===cur),m=c&&c.msgs[i],v=d.querySelector("textarea").value.trim();
+ if(!m||busy||(!v&&!(m.att||[]).length))return;
+ m.content=v;c.msgs=c.msgs.slice(0,i+1);c.model=$("#model").value;
+ if(i===0)c.title=(v||m.att[0].name).slice(0,40);
+ generate(c);
+}
+$("#f").onsubmit=async e=>{
+ e.preventDefault();
+ if(busy){busy.abort();return}
+ const text=t.value.trim();if(!text&&!pending.length)return;
+ t.value="";t.style.height="auto";
+ let c=chats.find(x=>x.id===cur);
+ if(!c){c={id:Date.now()+"",title:(text||pending[0].name).slice(0,40),msgs:[],model:$("#model").value};chats.unshift(c);cur=c.id}
+ c.model=$("#model").value;
+ c.msgs.push({role:"user",content:text,att:pending});pending=[];renderTray();
+ generate(c);
+};
+async function generate(c){
+ const last=c.msgs[c.msgs.length-1];
+ const reply={role:"assistant",content:""};c.msgs.push(reply);render();
+ const bub=$("#msgs").lastChild;
+ busy=new AbortController();$("#send").textContent="■";
+ try{
+  if(!models.find(x=>x.id===c.model)?.vision){
+   for(const m of c.msgs)for(const a of m.att||[])if(a.type==="image"&&a.data&&!a.desc){
+    bub.textContent="Reading "+a.name+"…";
+    a.desc=await describe(a,m===last?last.content:"",busy.signal);save();
+   }
+   bub.textContent="";
+  }
+  const r=await fetch("/api/chat",{method:"POST",signal:busy.signal,headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({model:c.model,stream:true,messages:c.msgs.slice(0,-1).map(m=>toApi(m,!!models.find(x=>x.id===c.model)?.vision))})});
+  if(r.status===401){showLogin();throw new Error("Session expired. Unlock and try again.")}
+  if(!r.ok)throw new Error((await r.text()).slice(0,300)||"Error "+r.status);
+  const rd=r.body.getReader(),dec=new TextDecoder();let buf="";
+  for(;;){const{done,value}=await rd.read();if(done)break;
+   buf+=dec.decode(value,{stream:true});const lines=buf.split("\n");buf=lines.pop();
+   for(const l of lines){if(!l.startsWith("data: ")||l.includes("[DONE]"))continue;
+    try{const j=JSON.parse(l.slice(6));if(j.error)throw new Error(j.error.message||"Model error");
+     reply.content+=j.choices?.[0]?.delta?.content||"";bub.innerHTML=md(reply.content);
+     $("#msgs").scrollTop=$("#msgs").scrollHeight}catch(x){if(x.message&&!(x instanceof SyntaxError))throw x}}}
+  if(!reply.content)throw new Error("The model returned nothing. Free models are sometimes busy; try another.");
+ }catch(x){if(x.name!=="AbortError"){reply.err=true;reply.content=(reply.content?reply.content+"\n\n":"")+"Error: "+x.message}}
+ busy=null;$("#send").textContent="↑";save();render();
+}
+fetch("/api/status").then(r=>r.json()).then(s=>{s.authed?loadModels():showLogin()});render();
+</script></body></html>
