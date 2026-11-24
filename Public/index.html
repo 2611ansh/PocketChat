@@ -62,12 +62,13 @@ textarea{flex:1;resize:none;max-height:160px;background:var(--bg);border:1px sol
  <header><button class="ib" id="menu" aria-label="Chats">☰</button><select id="model" aria-label="Model"></select><button class="ib" id="pm" type="button" title="Project mode: build whole projects and download as .zip" aria-label="Project mode">🗂</button></header>
  <div id="msgs"></div>
  <div id="tray"></div>
- <form id="f"><button type="button" class="ib" id="clip" aria-label="Attach">📎</button><input id="file" type="file" multiple hidden><textarea id="t" rows="1" placeholder="Message"></textarea><button id="send" type="submit" aria-label="Send">↑</button></form>
+ <form id="f"><button type="button" class="ib" id="clip" aria-label="Attach">📎</button><input id="file" type="file" accept="*/*" multiple hidden><textarea id="t" rows="1" placeholder="Message"></textarea><button id="send" type="submit" aria-label="Send">↑</button></form>
 </div>
 <script>
 const $=s=>document.querySelector(s);
 let chats=JSON.parse(localStorage.pc_chats||"[]"),cur=null,busy=null;
 let models=[],pending=[];
+const imagePreviews={};
 function save(){try{localStorage.pc_chats=JSON.stringify(chats)}catch{
  for(const c of chats)for(const m of c.msgs)if(m.att)m.att=m.att.map(a=>a.type==="image"?{type:"image",name:a.name,data:null}:a);
  try{localStorage.pc_chats=JSON.stringify(chats)}catch{}}}
@@ -112,9 +113,40 @@ $("#menu").onclick=()=>document.body.classList.add("open");
 $("#scrim").onclick=()=>document.body.classList.remove("open");
 const CAP=60000,loaded={};
 function lib(u){return loaded[u]||(loaded[u]=new Promise((ok,no)=>{const s=document.createElement("script");s.src=u;s.onload=ok;s.onerror=()=>no(new Error("Could not load the reader library (needs internet)"));document.head.appendChild(s)}))}
+let assetDB;
+function getAssetDB(){
+ if(!assetDB)assetDB=new Promise((ok,no)=>{
+  if(!("indexedDB"in window)){no(new Error("This browser can't store binary attachments. Update the browser and try again."));return}
+  const req=indexedDB.open("pocketchat-assets",1);
+  req.onupgradeneeded=()=>req.result.createObjectStore("files");
+  req.onsuccess=()=>ok(req.result);req.onerror=()=>no(req.error||new Error("Could not open attachment storage"));
+ });
+ return assetDB;
+}
+function storeAsset(blob){
+ return getAssetDB().then(db=>new Promise((ok,no)=>{
+  const id="asset-"+Date.now()+"-"+Math.random().toString(36).slice(2);
+  const tx=db.transaction("files","readwrite");tx.objectStore("files").put(blob,id);
+  tx.oncomplete=()=>ok(id);tx.onerror=()=>no(tx.error||new Error("Could not save an attachment"));tx.onabort=()=>no(tx.error||new Error("Could not save an attachment"));
+ }));
+}
+function loadAsset(id){
+ return getAssetDB().then(db=>new Promise((ok,no)=>{
+  const req=db.transaction("files").objectStore("files").get(id);
+  req.onsuccess=()=>req.result?ok(req.result):no(new Error("An original attachment is no longer available. Re-attach the file to include it in a download."));
+  req.onerror=()=>no(req.error||new Error("Could not read an attachment"));
+ }));
+}
+async function saveAsset(blob,path,mime){
+ return{path,mime:mime||"application/octet-stream",size:blob.size,id:await storeAsset(blob)};
+}
+function fileMime(path){
+ const ext=path.split(".").pop().toLowerCase();
+ return({png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",bmp:"image/bmp",ico:"image/x-icon",pdf:"application/pdf",mp3:"audio/mpeg",wav:"audio/wav",mp4:"video/mp4",mov:"video/quicktime",woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf",otf:"font/otf"})[ext]||"application/octet-stream";
+}
 function attHtml(m){
  if(!m.att||!m.att.length)return"";
- return'<div class="chips">'+m.att.map(a=>a.type==="image"?(a.data?`<img src="${a.data}" alt="">`:`<span class="dc">🖼 ${esc(a.name)}</span>`):`<span class="dc">${a.type==="project"?"📦":"📄"} ${esc(a.name)}${a.type==="project"&&a.files.length>1?" ("+a.files.length+" files)":""}</span>`).join("")+"</div>";
+ return'<div class="chips">'+m.att.map(a=>a.type==="image"?(a.data?`<img src="${a.data}" alt="">`:`<span class="dc">🖼 ${esc(a.name)}</span>`):`<span class="dc">${a.type==="project"?"📦":"📄"} ${esc(a.name)}${a.type==="project"&&a.files.length+a.assets?.length>1?" ("+(a.files.length+a.assets.length)+" files)":""}</span>`).join("")+"</div>";
 }
 function toApi(m,vis,skipProj){
  if(m.role!=="user"||!m.att||!m.att.length)return{role:m.role,content:m.content};
@@ -122,10 +154,12 @@ function toApi(m,vis,skipProj){
  if(!skipProj)for(const a of m.att.filter(a=>a.type==="project"))pre+=projText(a);
  for(const a of m.att.filter(a=>a.type==="doc"))pre+=`[Attached file: ${a.name}]\n${a.text}\n[End of file]\n\n`;
  const imgs=m.att.filter(a=>a.type==="image");
+ const projectImgs=skipProj?[]:m.att.filter(a=>a.type==="project").flatMap(a=>a.assets||[]).filter(a=>a.mime?.startsWith("image/"));
  const note=a=>`[Attached image "${a.name}", as described by a vision model: ${a.desc||"description unavailable"}]\n\n`;
- if(!vis||!imgs.some(a=>a.data)){for(const a of imgs)pre+=note(a);return{role:"user",content:pre+m.content}}
+ if(!vis||(!imgs.some(a=>a.data)&&!projectImgs.some(a=>imagePreviews[a.id]))){for(const a of imgs)pre+=note(a);return{role:"user",content:pre+m.content}}
  const parts=[{type:"text",text:pre+(m.content||"Describe the attached image.")}];
  for(const a of imgs){if(a.data)parts.push({type:"image_url",image_url:{url:a.data}});else parts[0].text=note(a)+parts[0].text}
+ for(const a of projectImgs){const data=imagePreviews[a.id];if(data)parts.push({type:"image_url",image_url:{url:data}})}
  return{role:"user",content:parts};
 }
 async function describe(a,focus,signal){
@@ -151,11 +185,13 @@ function renderTray(){
   d.querySelector("button").onclick=()=>{pending.splice(i,1);renderTray()};tr.appendChild(d)});
  const vis=!!models.find(x=>x.id===$("#model").value)?.vision;
  if(pending.some(a=>a.type==="image")&&!vis){const w=document.createElement("div");w.className="note";w.textContent="This model can't see images, so a free vision model will read them first and pass on a description.";tr.appendChild(w)}
+ if(pending.some(a=>a.type==="project"&&a.assets?.length)){const w=document.createElement("div");w.className="note";w.textContent="Binary and oversized files are preserved unchanged. Text/code files can be edited; image and PDF contents are analyzed when possible. ZIPs: 50 MB compressed / 100 MB unpacked.";tr.appendChild(w)}
+ if(pending.some(a=>a.type==="project"&&(a.omitted?.length||a.unsafe||a.analysisError||a.assets?.some(x=>x.analysisError)))){const w=document.createElement("div");w.className="warn";w.textContent="Some files could not be fully analyzed or included. The model will be told which files were skipped.";tr.appendChild(w)}
 }
 function shrink(f){return new Promise((ok,no)=>{const u=URL.createObjectURL(f),im=new Image();
  im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;
   c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL("image/jpeg",.8))};
- im.onerror=()=>no(new Error("Could not read image "+f.name));im.src=u})}
+ im.onerror=()=>{URL.revokeObjectURL(u);no(new Error("Could not read image "+(f.name||"file")))};im.src=u})}
 async function readDoc(f){
  const ext=f.name.split(".").pop().toLowerCase();let out="";
  if(ext==="pdf"){
@@ -175,18 +211,24 @@ $("#clip").onclick=()=>$("#file").click();
 $("#file").onchange=async e=>{
  for(const f of e.target.files){
   try{
+   if(f.size>100000000)throw new Error(f.name+" is too large to attach (maximum 100 MB).");
    if(f.type.startsWith("image/"))pending.push({type:"image",name:f.name,data:await shrink(f)});
-   else if(/\.zip$/i.test(f.name))pending.push(await readZip(f));
+   else if(/\.(zip|xlsx|pptx|ods|odt|epub)$/i.test(f.name))pending.push(await readZip(f));
    else if(/\.(pdf|docx)$/i.test(f.name))pending.push({type:"doc",name:f.name,text:await readDoc(f)});
    else pending.push(await readTextFile(f));
-  }catch(x){alert(x.message)}
+  }catch(x){
+   if(/\.(pdf|docx)$/i.test(f.name)){
+    try{pending.push({type:"project",name:f.name,files:[],assets:[await saveAsset(f,f.name,f.type)],docs:[],omitted:[],ignored:0,analysisError:x.message})}
+    catch(y){alert(y.message)}
+   }else alert(x.message)
+  }
   renderTray();
  }
  e.target.value="";
 };
 /*PROJ*/
-const SYS=`You are an expert software engineer. When asked to build or change a project, output EVERY file in full (never snippets, never "rest unchanged"). Format each file exactly like this: a line "### File: relative/path/to/file.ext" followed immediately by a fenced code block with the complete file contents. Use relative paths with forward slashes. Include config and dependency files (package.json, requirements.txt, README.md, .gitignore, etc.). Start with a short plan and the folder tree (in a plain code block, without a File header), then the files, then brief run instructions. If the project is too big for one reply, deliver the most important files first and end with "Say continue for the remaining files." When modifying an existing project, output only the changed files, in full, with the same paths.`;
-function okPath(x){return x.length<160&&/^[\w@.+\-\/]+$/.test(x)&&!x.startsWith("/")&&!x.includes("..")&&(/\.[A-Za-z0-9]+$/.test(x)||/(^|\/)(Dockerfile|Makefile|Procfile|LICENSE)$/.test(x))}
+const SYS=`You are an expert software engineer. When asked to build or change a project, output EVERY file in full (never snippets, never "rest unchanged"). Format each file exactly like this: a line "### File: relative/path/to/file.ext" followed immediately by a fenced code block with the complete file contents. Use relative paths with forward slashes. Include config and dependency files (package.json, requirements.txt, README.md, .gitignore, etc.). Start with a short plan and the folder tree (in a plain code block, without a File header), then the files, then brief run instructions. If the project is too big for one reply, deliver the most important files first and end with "Say continue for the remaining files." When modifying an existing project, output only the changed files, in full, with the same paths. For uploaded projects, retain original paths and output only files that should change; do not claim to edit binary assets that were supplied only as metadata, and say when a requested binary-format change cannot be produced as a text file.`;
+function okPath(x){return x.length<160&&/^[\w@.+\-\/\[\]]+$/.test(x)&&!x.startsWith("/")&&!x.includes("..")&&(/\.[A-Za-z0-9]+$/.test(x)||/(^|\/)(Dockerfile|Makefile|Procfile|LICENSE)$/.test(x))}
 function pathFrom(line){
  const x=line.trim().replace(/^(?:#{1,6}\s*|>\s*|[-*]\s+|\d+[.)]\s+)+/,"").replace(/^[*`]*(?:file(?:name)?|path)[*`]*\s*[:\-]\s*/i,"").replace(/[*`]/g,"").replace(/\s*\(.*\)\s*$/,"").replace(/[:\s]+$/,"").trim();
  return okPath(x)?x:null;
@@ -220,14 +262,18 @@ function canon(p,map){
  return p;
 }
 function projectFiles(c,upto,changedOnly){
- const map=new Map(),changed=new Set();
+ const map=new Map(),changed=new Set(),binary=new Set();
  for(let i=0;i<=upto;i++){
   const m=c.msgs[i];
-  if(m.role==="user"){for(const a of m.att||[])if(a.type==="project")for(const f of a.files)map.set(f.path,f.content)}
+  if(m.role==="user"){for(const a of m.att||[])if(a.type==="project"){
+   for(const f of a.files){map.set(f.path,f.content);binary.delete(f.path);changed.delete(f.path)}
+   for(const f of a.assets||[]){map.delete(f.path);binary.add(f.path);changed.delete(f.path)}
+  }}
   else if(m.role==="assistant"&&!m.err){
    const rng=new Map();
    for(const f of parseFiles(m.content)){
     const p=canon(f.path,map);
+    if(binary.has(p))continue;
     if(f.range){if(!rng.has(p))rng.set(p,[]);rng.get(p).push(f)}else{map.set(p,f.content);changed.add(p)}
    }
    for(const[p,list]of rng){
@@ -263,18 +309,23 @@ function partText(items){
  return items.map(it=>{const q=fenceFor(it.text);return`### File: ${it.path}${it.range?` [lines ${it.range[0]}-${it.range[1]} of ${it.range[2]}]`:""}\n${q}\n${it.text}${q}\n\n`}).join("");
 }
 async function readTextFile(f){
+ if(f.size>100000000)throw new Error(f.name+" is too large to attach (maximum 100 MB).");
+ if(f.size>1000000)return{type:"project",name:f.name,files:[],assets:[await saveAsset(f,f.name,f.type)],omitted:[],ignored:0};
  const b=new Uint8Array(await f.arrayBuffer());
- if(b.subarray(0,8000).includes(0))throw new Error(f.name+" looks like a binary file, so it can't be read as text.");
- if(b.length>1000000)throw new Error(f.name+" is too large (over 1 MB).");
- return{type:"project",name:f.name,files:[{path:f.name,content:new TextDecoder().decode(b)}],omitted:[],ignored:0};
+ let content;
+ try{if(b.subarray(0,8000).includes(0))throw new Error("binary");content=new TextDecoder("utf-8",{fatal:true}).decode(b)}
+ catch{return{type:"project",name:f.name,files:[],assets:[await saveAsset(f,f.name,f.type)],omitted:[],ignored:0}}
+ return{type:"project",name:f.name,files:[{path:f.name,content}],assets:[],omitted:[],ignored:0};
 }
 const crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
 function crc32(b){let c=~0;for(let i=0;i<b.length;i++)c=crcT[(c^b[i])&255]^(c>>>8);return ~c>>>0}
-function makeZip(files){
+async function makeZip(files){
+ if(files.length>65535)throw new Error("Too many files to create a ZIP archive.");
  const enc=new TextEncoder(),parts=[],cd=[],d=new Date();let off=0;
  const dt=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1),dd=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
  for(const f of files){
-  const name=enc.encode(f.path),data=enc.encode(f.content),crc=crc32(data);
+  const name=enc.encode(f.path),data=f.blob?new Uint8Array(await f.blob.arrayBuffer()):enc.encode(f.content),crc=crc32(data);
+  if(data.length>0xFFFFFFFF||off+30+name.length+data.length>0xFFFFFFFF)throw new Error("The generated ZIP is too large for this browser.");
   const h=new DataView(new ArrayBuffer(30));
   h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(10,dt,true);h.setUint16(12,dd,true);
   h.setUint32(14,crc,true);h.setUint32(18,data.length,true);h.setUint32(22,data.length,true);h.setUint16(26,name.length,true);
@@ -290,8 +341,7 @@ function makeZip(files){
 }
 
 const PCAP=1000000;
-const IGN=/(^|\/)(node_modules|\.git|\.svn|__pycache__|venv|\.venv|dist|build|\.next|\.idea|\.vscode|target|coverage|__MACOSX)(\/|$)|(^|\/)\.DS_Store$|(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Cargo\.lock|composer\.lock)$/;
-const BIN=/\.(png|jpe?g|gif|webp|ico|bmp|tiff?|heic|pdf|zip|gz|tgz|tar|7z|rar|mp[34]|mov|avi|wav|woff2?|ttf|otf|eot|so|dll|dylib|exe|class|jar|pyc|o|a|bin|dat|sqlite3?|db)$/i;
+const IGN=/(^|\/)(node_modules|\.git|\.svn|__pycache__|venv|\.venv|dist|build|\.next|\.idea|\.vscode|target|coverage|__MACOSX)(\/|$)|(^|\/)\.DS_Store$/;
 async function inflate(u8){
  if(typeof DecompressionStream==="undefined")throw new Error("This browser can't unzip compressed files. Update iOS/Safari (16.4+).");
  const ds=new DecompressionStream("deflate-raw"),w=ds.writable.getWriter();
@@ -299,57 +349,109 @@ async function inflate(u8){
  return new Uint8Array(await new Response(ds.readable).arrayBuffer());
 }
 async function readZip(f){
+ if(f.size>50000000)throw new Error(f.name+" is too large to unpack (maximum 50 MB).");
  const buf=new Uint8Array(await f.arrayBuffer()),dv=new DataView(buf.buffer);
  let e=-1;for(let i=buf.length-22;i>=Math.max(0,buf.length-65557);i--)if(dv.getUint32(i,true)===0x06054b50){e=i;break}
  if(e<0)throw new Error(f.name+" is not a valid zip file.");
- const n=dv.getUint16(e+10,true),dec=new TextDecoder();let p=dv.getUint32(e+16,true);
- const ent=[];let ignored=0;
- for(let k=0;k<n&&dv.getUint32(p,true)===0x02014b50;k++){
-  const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true),usize=dv.getUint32(p+24,true),nl=dv.getUint16(p+28,true),el=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),off=dv.getUint32(p+42,true);
+ const n=dv.getUint16(e+10,true),dec=new TextDecoder();let p=dv.getUint32(e+16,true),expanded=0;
+ if(n>1000)throw new Error(f.name+" contains too many files (maximum 1,000).");
+ const ent=[];let ignored=0,unsafe=0;
+ for(let k=0;k<n;k++){
+  if(p+46>buf.length||dv.getUint32(p,true)!==0x02014b50)throw new Error(f.name+" contains an invalid ZIP directory.");
+  const flags=dv.getUint16(p+8,true),method=dv.getUint16(p+10,true),crc=dv.getUint32(p+16,true),csize=dv.getUint32(p+20,true),usize=dv.getUint32(p+24,true),nl=dv.getUint16(p+28,true),el=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),off=dv.getUint32(p+42,true);
+  if(p+46+nl+el+cl>buf.length)throw new Error(f.name+" contains an invalid ZIP directory.");
   const name=dec.decode(buf.subarray(p+46,p+46+nl));p+=46+nl+el+cl;
   if(name.endsWith("/"))continue;
   if(IGN.test(name)){ignored++;continue}
-  ent.push({name,method,csize,usize,off});
+  const safe=name.replace(/\\/g,"/");
+  if(!safe||safe.startsWith("/")||/^[a-z]:/i.test(safe)||safe.split("/").some(part=>!part||part==="."||part==="..")||safe.includes("\0")){unsafe++;continue}
+  expanded+=usize;if(expanded>100000000)throw new Error(f.name+" expands beyond the 100 MB safety limit.");
+  ent.push({name:safe,flags,method,crc,csize,usize,off});
  }
  if(!ent.length)throw new Error("No usable files found in "+f.name);
  const roots=new Set(ent.map(x=>x.name.split("/")[0]));
  const strip=roots.size===1&&ent.every(x=>x.name.includes("/"));
- const got=[],omitted=[];
- for(const x of ent){
+ const files=[],assets=[],docs=[],omitted=[];let textBytes=0,docChars=0;
+ for(const x of ent.sort((a,b)=>a.usize-b.usize)){
   const path=strip?x.name.slice(x.name.indexOf("/")+1):x.name;
-  if(BIN.test(path)||x.usize>1000000||(x.method!==0&&x.method!==8)||x.usize===0xFFFFFFFF){omitted.push(path);continue}
-  const st=x.off+30+dv.getUint16(x.off+26,true)+dv.getUint16(x.off+28,true),raw=buf.subarray(st,st+x.csize);
+  if(!path||x.usize>100000000||(x.flags&1)||(x.method!==0&&x.method!==8)){omitted.push(path);continue}
+  if(x.off+30>buf.length||dv.getUint32(x.off,true)!==0x04034b50)throw new Error(f.name+" contains an invalid file header.");
+  const st=x.off+30+dv.getUint16(x.off+26,true)+dv.getUint16(x.off+28,true);
+  if(st+x.csize>buf.length)throw new Error(f.name+" contains truncated file data.");
+  const raw=buf.subarray(st,st+x.csize);
   const bytes=x.method===0?raw:await inflate(raw);
-  if(bytes.subarray(0,8000).includes(0)){omitted.push(path);continue}
-  got.push({path,content:dec.decode(bytes)});
+  if(bytes.length!==x.usize||crc32(bytes)!==x.crc)throw new Error(f.name+" contains an invalid compressed file: "+path);
+  let content=null;
+  if(!/\.(pdf|docx)$/i.test(path)&&bytes.length<=PCAP-textBytes&&!bytes.subarray(0,8000).includes(0)){
+   try{content=new TextDecoder("utf-8",{fatal:true}).decode(bytes)}catch{}
+  }
+  if(content!==null){files.push({path,content});textBytes+=bytes.length}
+  else{
+   let analysisError="";
+   if(/\.(pdf|docx)$/i.test(path)){
+    try{
+     const extracted=await readDoc({name:path,arrayBuffer:async()=>bytes.slice().buffer});
+     if(extracted.trim()&&docChars<100000){
+      const text=extracted.slice(0,100000-docChars);
+      docs.push({path,text});docChars+=text.length;
+     }
+    }catch(x){analysisError=x.message||"Text extraction failed."}
+   }
+   const asset=await saveAsset(new Blob([bytes],{type:fileMime(path)}),path,fileMime(path));
+   if(analysisError)asset.analysisError=analysisError;
+   assets.push(asset);
+  }
  }
- got.sort((a,b)=>a.content.length-b.content.length);
- let tot=0;const files=[];
- for(const g of got){if(tot+g.content.length<=PCAP){files.push(g);tot+=g.content.length}else omitted.push(g.path)}
- if(!files.length)throw new Error("No readable text files found in "+f.name);
  files.sort((a,b)=>a.path<b.path?-1:1);
- return{type:"project",name:f.name,files,omitted:omitted.slice(0,200),ignored};
+ assets.sort((a,b)=>a.path<b.path?-1:1);
+ if(!files.length&&!assets.length)throw new Error("No usable files found in "+f.name);
+ return{type:"project",name:f.name,archive:true,files,assets,docs,omitted:omitted.slice(0,200),ignored,unsafe};
 }
-function projText(a){
+function projText(a,includeFiles=true){
  const fence=s=>{let n=3;while(s.includes("`".repeat(n)))n++;return"`".repeat(n)};
- let t=a.files.length===1&&!/\.zip$/i.test(a.name)?`[Uploaded file "${a.name}".`:`[Uploaded project "${a.name}": ${a.files.length} text files included.`;
- if(a.omitted.length)t+=` Left out (binary, too large, or over the size limit): ${a.omitted.slice(0,60).join(", ")}${a.omitted.length>60?", ...":""}.`;
- if(a.ignored)t+=` ${a.ignored} files in ignored folders (node_modules, .git, build output, lock files) were skipped.`;
+ let t=`[Uploaded ${a.archive?"ZIP project":"file"} "${a.name}": ${a.files.length} text files included and ${a.assets?.length||0} binary or oversized files preserved.`;
+ if(a.omitted.length)t+=` Not included (unsupported or encrypted compression): ${a.omitted.slice(0,60).join(", ")}${a.omitted.length>60?", ...":""}.`;
+ if(a.ignored)t+=` ${a.ignored} files in ignored folders (node_modules, .git, build output) were skipped.`;
+ if(a.unsafe)t+=` ${a.unsafe} files with unsafe paths were skipped.`;
+ if(a.analysisError)t+=` Text extraction failed: ${a.analysisError}.`;
+ if(a.assets?.length){
+  t+=" Binary/oversized files are retained unchanged for the downloadable project. Their contents are available only when an image preview or extracted document text is provided. Do not claim to edit binary files directly. File metadata:\n";
+  for(const x of a.assets.slice(0,200))t+=`- ${x.path} (${x.mime}, ${x.size} bytes)${x.desc?`: ${x.desc}`:""}${x.analysisError?` [analysis note: ${x.analysisError}]`:""}\n`;
+  if(a.assets.length>200)t+=`- ${a.assets.length-200} additional binary files are preserved but not listed.\n`;
+ }
  t+="]\n\n";
- for(const f of a.files){const q=fence(f.content);t+=`### File: ${f.path}\n${q}\n${f.content}${f.content.endsWith("\n")?"":"\n"}${q}\n\n`}
+ for(const d of a.docs||[])t+=`[Extracted text from ${d.path}; the original file will be preserved unchanged]\n${d.text}\n[End of extracted text]\n\n`;
+ if(includeFiles)for(const f of a.files){const q=fence(f.content);t+=`### File: ${f.path}\n${q}\n${f.content}${f.content.endsWith("\n")?"":"\n"}${q}\n\n`}
  return t+"[End of uploaded project]\n\n";
 }
 /*ENDPROJ*/
 let pm=localStorage.pc_pm==="1";
 function setPM(){$("#pm").classList.toggle("on",pm);$("#t").placeholder=pm?"Describe the project to build":"Message"}
-function zipBtn(c,i){if(!parseFiles(c.msgs[i].content).length)return"";const n=projectFiles(c,i,true).length;return`<button type="button" class="cp" data-k="zip" data-i="${i}">⬇ ${n>1?"Download .zip":"Download file"} (${n} file${n>1?"s":""})</button>`}
+function projectAssets(c,upto){
+ const assets=new Map(),written=new Set(projectFiles(c,upto,false).map(f=>f.path));
+ for(let i=0;i<=upto;i++)if(c.msgs[i].role==="user")for(const a of c.msgs[i].att||[])if(a.type==="project")for(const asset of a.assets||[])assets.set(asset.path,asset);
+ return[...assets.values()].filter(a=>!written.has(a.path));
+}
+function zipBtn(c,i){
+ const changed=projectFiles(c,i,true),archives=c.msgs.slice(0,i).flatMap(m=>(m.att||[]).filter(a=>a.type==="project"&&a.archive));
+ if(!changed.length)return"";
+ const n=(archives.length?projectFiles(c,i,false):changed).length+projectAssets(c,i).length;
+ const ext=archives.length===1&&/\.(xlsx|pptx|ods|odt|epub)$/i.test(archives[0].name)?archives[0].name.split(".").pop().toLowerCase():"zip";
+ return`<button type="button" class="cp" data-k="zip" data-i="${i}">⬇ ${archives.length||n>1?"Download ."+ext:"Download file"} (${n} file${n>1?"s":""})</button>`;
+}
 function fileList(c,i){const f=[...new Set(parseFiles(c.msgs[i].content).map(x=>x.path))];return f.length?`<details class="fl"><summary>${f.length} file${f.length>1?"s":""} in this reply</summary>${f.map(esc).join("<br>")}</details>`:""}
-function downloadZip(c,i){
- const slug=(c.title||"project").replace(/\.zip$/i,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"project";
- const files=projectFiles(c,i,true),upload=c.msgs.some(m=>(m.att||[]).some(a=>a.type==="project"));
+async function downloadZip(c,i){
+ const archives=c.msgs.slice(0,i).flatMap(m=>(m.att||[]).filter(a=>a.type==="project"&&a.archive));
+ const slug=(c.title||"project").replace(/\.(zip|xlsx|pptx|ods|odt|epub)$/i,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"project";
+ const archive=archives.length>0,archiveExt=archives.length===1&&/\.(xlsx|pptx|ods|odt|epub)$/i.test(archives[0].name)?archives[0].name.split(".").pop().toLowerCase():"zip";
+ const files=projectFiles(c,i, !archive),assets=projectAssets(c,i);
  let blob,name;
- if(files.length===1){blob=new Blob([files[0].content],{type:"text/plain"});name=files[0].path.split("/").pop()}
- else{blob=makeZip(files.map(f=>({path:upload?f.path:slug+"/"+f.path,content:f.content})));name=slug+(upload?"-changes":"")+".zip"}
+ if(files.length===1&&!assets.length&&!archive){blob=new Blob([files[0].content],{type:"text/plain"});name=files[0].path.split("/").pop()}
+ else{
+  const entries=files.map(f=>({path:archive?f.path:slug+"/"+f.path,content:f.content}));
+  for(const asset of assets)entries.push({path:archive?asset.path:slug+"/"+asset.path,blob:await loadAsset(asset.id)});
+  blob=await makeZip(entries);name=slug+(archive?"-updated":"")+"."+archiveExt;
+ }
  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();
  setTimeout(()=>URL.revokeObjectURL(a.href),20000);
 }
@@ -366,7 +468,7 @@ $("#msgs").addEventListener("click",async e=>{
  const k=b.dataset.k;
  if(k==="edit"){if(!busy)startEdit(+b.dataset.i,b.closest(".m"));return}
  if(k==="cancel"){render();return}
- if(k==="zip"){downloadZip(chats.find(x=>x.id===cur),+b.dataset.i);return}
+ if(k==="zip"){try{await downloadZip(chats.find(x=>x.id===cur),+b.dataset.i)}catch(x){alert(x.message)}return}
  if(k==="send"){sendEdit(+b.dataset.i,b.closest(".m"));return}
  const text=b.dataset.k==="code"?b.closest(".cb").querySelector("code").textContent.replace(/\n$/,""):(chats.find(x=>x.id===cur)?.msgs[b.dataset.i]?.content||"");
  const ok=await copyText(text),old=b.textContent;
@@ -425,21 +527,32 @@ async function generate(c){
  const bub=$("#msgs").lastChild;
  busy=new AbortController();$("#send").textContent="■";
  const vis=!!models.find(x=>x.id===c.model)?.vision;
+ const hasProj=c.msgs.some(m=>(m.att||[]).some(a=>a.type==="project"));
+ const state=projectFiles(c,c.msgs.length-2),total=state.reduce((n,f)=>n+f.content.length,0),limit=partLimit(c.model);
+ const largeProject=hasProj&&total>limit;
  try{
-  if(!vis){
+  if(!vis||largeProject){
    for(const m of c.msgs)for(const a of m.att||[])if(a.type==="image"&&a.data&&!a.desc){
     bub.textContent="Reading "+a.name+"…";
     a.desc=await describe(a,m===last?last.content:"",busy.signal);save();
    }
-   bub.textContent="";
   }
-  const hasProj=c.msgs.some(m=>(m.att||[]).some(a=>a.type==="project"));
-  const state=projectFiles(c,c.msgs.length-2),total=state.reduce((n,f)=>n+f.content.length,0),limit=partLimit(c.model);
+  let projectImageCount=0;
+  for(const m of c.msgs)for(const a of m.att||[])if(a.type==="project")for(const asset of a.assets||[]){
+   if(!asset.mime?.startsWith("image/"))continue;
+   if(projectImageCount++>=8){asset.analysisError=asset.analysisError||"Image analysis limit reached (8 images per request).";continue}
+   try{
+    if(!imagePreviews[asset.id])imagePreviews[asset.id]=await shrink(await loadAsset(asset.id));
+    if((!vis||largeProject)&&!asset.desc){bub.textContent="Reading "+asset.path+"…";asset.desc=await describe({name:asset.path,data:imagePreviews[asset.id]},m===last?last.content:"",busy.signal);save()}
+   }catch(x){if(x.name==="AbortError")throw x;asset.analysisError="Image analysis unavailable: "+x.message;save()}
+  }
+  bub.textContent="";
   let reqs;
-  if(hasProj&&total>limit){
+  if(largeProject){
    const parts=buildParts(state,limit);
    const tree=state.slice(0,400).map(f=>`${f.path} (${f.content.split("\n").length} lines)`).join("\n");
-   const req=toApi(last,false,true).content;
+   const context=c.msgs.slice(0,-1).flatMap(m=>(m.att||[]).filter(a=>a.type==="project").map(a=>projText(a,false))).join("\n");
+   const req=toApi(last,false,true).content+"\n\n"+context;
    reqs=parts.map((p,k)=>({msgs:[{role:"user",content:`${SYS_PART}\n\nAll project files:\n${tree}\n\nThe user's request:\n${req}\n\n---\nThis is part ${k+1} of ${parts.length}. Files in this part:\n\n${partText(p)}`}]}));
    reply.content=`*Large project (${state.length} files): processing in ${parts.length} parts.*\n\n`;
   }else{
