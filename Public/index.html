@@ -66,7 +66,9 @@ textarea{flex:1;resize:none;max-height:160px;background:var(--bg);border:1px sol
 </div>
 <script>
 const $=s=>document.querySelector(s);
-let chats=JSON.parse(localStorage.pc_chats||"[]"),cur=null,busy=null;
+let chats=[],cur=null,busy=null;
+try{const saved=JSON.parse(localStorage.pc_chats||"[]");if(Array.isArray(saved))chats=saved}
+catch{try{localStorage.removeItem("pc_chats")}catch{}}
 let models=[],pending=[];
 const imagePreviews={};
 function save(){try{localStorage.pc_chats=JSON.stringify(chats)}catch{
@@ -108,6 +110,7 @@ $("#model").onchange=e=>{localStorage.pc_model=e.target.value;renderTray()};
 function showLogin(){$("#login").style.display="flex"}
 $("#go").onclick=async()=>{const r=await fetch("/api/login",{method:"POST",body:JSON.stringify({pin:$("#pin").value})});
  if(r.ok){$("#login").style.display="none";loadModels()}else{$("#pin").value="";$("#pin").placeholder="Wrong PIN"}};
+$("#pin").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();$("#go").click()}};
 $("#new").onclick=()=>{cur=null;document.body.classList.remove("open");render();$("#t").focus()};
 $("#menu").onclick=()=>document.body.classList.add("open");
 $("#scrim").onclick=()=>document.body.classList.remove("open");
@@ -576,5 +579,5 @@ async function generate(c){
  }catch(x){if(x.name!=="AbortError"){reply.err=true;reply.content=(reply.content?reply.content+"\n\n":"")+"Error: "+x.message}}
  busy=null;$("#send").textContent="↑";save();render();
 }
-fetch("/api/status").then(r=>r.json()).then(s=>{s.authed?loadModels():showLogin()});setPM();render();
+fetch("/api/status").then(r=>r.json()).then(s=>{s.authed?loadModels():showLogin()}).catch(()=>showLogin());setPM();render();
 </script></body></html>
